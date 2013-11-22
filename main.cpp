@@ -1,18 +1,19 @@
 #include <Arduino.h>
 #include <AFMotor.h>
 
-const int leftSensor = A5;
-const int rightSensor = A4;
-const unsigned long maxReverseTime = 1000;
-const int turnTime = 1000;
+const int LEFT_SENSOR = A5;
+const int RIGHT_SENSOR = A4;
+const unsigned long MAX_REVERSE_TIME = 500;
+const int TURN_TIME = 500;
+const int AVOIDANCE_TIME = 2 * MAX_REVERSE_TIME + TURN_TIME;
 // DC motor on M1
-AF_DCMotor motor1(1);
+AF_DCMotor frontRight(1);
 // DC motor on M2
-AF_DCMotor motor2(2);
+AF_DCMotor backRight(2);
 // DC motor on M3
-AF_DCMotor motor3(3);
+AF_DCMotor backLeft(3);
 // DC motor on M4
-AF_DCMotor motor4(4);
+AF_DCMotor frontLeft(4);
 
 enum Direction {
     LEFT, RIGHT, NONE
@@ -25,25 +26,28 @@ void turnRight();
 void turnLeft();
 
 unsigned long lastForwardTime = 0;
+int leftDirectionBias = 0;
+unsigned long lastAvoidTime = 0;
+int potentialRepeatAvoids = 0;
 
 void setup() {
     Serial.begin(9600); // set up Serial library at 9600 bps
-    pinMode(leftSensor, INPUT);
-    pinMode(rightSensor, INPUT);
+    pinMode(LEFT_SENSOR, INPUT);
+    pinMode(RIGHT_SENSOR, INPUT);
 
 
     // turn on motor #1;
-    motor1.setSpeed(255);
-    motor1.run(RELEASE);
+    frontRight.setSpeed(255);
+    frontRight.run(RELEASE);
     // turn on motor #2
-    motor2.setSpeed(255);
-    motor2.run(RELEASE);
+    backRight.setSpeed(255);
+    backRight.run(RELEASE);
     // turn on motor #3
-    motor3.setSpeed(255);
-    motor3.run(RELEASE);
+    backLeft.setSpeed(255);
+    backLeft.run(RELEASE);
     // turn on motor #4
-    motor4.setSpeed(255);
-    motor4.run(RELEASE);
+    frontLeft.setSpeed(255);
+    frontLeft.run(RELEASE);
     forward();
 
 }
@@ -57,18 +61,24 @@ Direction lastDirection = NONE;
 
 void loop() {
 
-    leftSensorState = digitalRead(leftSensor);
-    rightSensorState = digitalRead(rightSensor);
+    leftSensorState = digitalRead(LEFT_SENSOR);
+    rightSensorState = digitalRead(RIGHT_SENSOR);
 
     if (leftSensorState == HIGH && rightSensorState == HIGH) {
-        if (lastDirection == NONE) {
+        Direction avoidDirection = lastDirection;
+        if (leftDirectionBias != 0) {
+            if (leftDirectionBias > 0)
+                avoidDirection = RIGHT;
+            else
+                avoidDirection = LEFT;
+        } else if (lastDirection == NONE) {
             int rand = millis() % 2;
             if (rand == 0)
-                lastDirection = LEFT;
+                avoidDirection = LEFT;
             else
-                lastDirection = RIGHT;
+                avoidDirection = RIGHT;
         }
-        avoidObstacle(lastDirection);
+        avoidObstacle(avoidDirection);
     } else if (leftSensorState == HIGH) {
         avoidObstacle(RIGHT);
     } else if (rightSensorState == HIGH) {
@@ -76,9 +86,19 @@ void loop() {
     }
 }
 
-void avoidObstacle(Direction dir) {
+void avoidObstacle(Direction potentialDirection) {
+    unsigned long curTime = millis();
+    if (curTime - lastAvoidTime < AVOIDANCE_TIME)
+        potentialRepeatAvoids++;
+    else
+        potentialRepeatAvoids = 0;
+
     backup();
-    if (dir == LEFT)
+    if (leftDirectionBias > 6)
+        potentialDirection = RIGHT;
+    else if (leftDirectionBias<-6)
+        potentialDirection = LEFT;
+    if (potentialDirection == LEFT)
         turnLeft();
     else
         turnRight();
@@ -87,35 +107,38 @@ void avoidObstacle(Direction dir) {
 
 void forward() {
     lastForwardTime = millis();
-    motor1.run(FORWARD);
-    motor2.run(FORWARD);
-    motor3.run(FORWARD);
-    motor4.run(FORWARD);
+    frontRight.run(FORWARD);
+    backRight.run(FORWARD);
+    backLeft.run(FORWARD);
+    frontLeft.run(FORWARD);
 }
 
 void turnRight() {
-    motor1.run(BACKWARD);
-    motor2.run(BACKWARD);
-    motor3.run(FORWARD);
-    motor4.run(FORWARD);
+    frontRight.run(BACKWARD);
+    backRight.run(BACKWARD);
+    backLeft.run(FORWARD);
+    frontLeft.run(FORWARD);
     lastDirection = RIGHT;
-    delay(turnTime);
+    leftDirectionBias -= 1;
+    delay(TURN_TIME * (1 + potentialRepeatAvoids));
 }
 
 void turnLeft() {
-    motor1.run(FORWARD);
-    motor2.run(FORWARD);
-    motor3.run(BACKWARD);
-    motor4.run(BACKWARD);
+    frontRight.run(FORWARD);
+    backRight.run(FORWARD);
+    backLeft.run(BACKWARD);
+    frontLeft.run(BACKWARD);
     lastDirection = LEFT;
-    delay(turnTime);
+    leftDirectionBias += 1;
+
+    delay(TURN_TIME * (1 + potentialRepeatAvoids));
 }
 
 void backup() {
     unsigned long curTime = millis();
-    motor1.run(BACKWARD);
-    motor2.run(BACKWARD);
-    motor3.run(BACKWARD);
-    motor4.run(BACKWARD);
-    delay(min(maxReverseTime, curTime - lastForwardTime));
+    frontRight.run(BACKWARD);
+    backRight.run(BACKWARD);
+    backLeft.run(BACKWARD);
+    frontLeft.run(BACKWARD);
+    delay(min(MAX_REVERSE_TIME, curTime - lastForwardTime));
 }
